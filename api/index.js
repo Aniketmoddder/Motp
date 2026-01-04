@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const ENCRYPTION_KEY = "X2h7nJ28tkfM4Yp9q1LdB3";
+const ENCRYPTION_KEY = "AIzaSyCx80ru6-RXeTi3GvqkFsMVyMf-vpgIoVw";
 
 function encryptPayload(data, password) {
     const salt = crypto.randomBytes(8);
