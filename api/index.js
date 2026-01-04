@@ -1,9 +1,8 @@
 const crypto = require('crypto');
 
-// Encryption key from the website
+// Encryption key
 const ENCRYPTION_KEY = "X2h7nJ28tkfM4Yp9q1LdB3";
 
-// Encrypt function matching the website
 function encryptPayload(data, password) {
     const salt = crypto.randomBytes(8);
     const keyiv = crypto.pbkdf2Sync(password, salt, 10000, 48, 'sha256');
@@ -24,73 +23,132 @@ function encryptPayload(data, password) {
     return finalBuffer.toString('base64');
 }
 
-// Main handler
 module.exports = async (req, res) => {
-    // Set CORS headers
+    // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
-    // Handle OPTIONS for CORS
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
     
-    // Handle GET request (show info)
+    // Handle GET - show API info
     if (req.method === 'GET') {
+        // Check if phone parameter is provided in GET
+        if (req.query.phone) {
+            const phone = req.query.phone;
+            
+            // Validate phone
+            if (!/^\d{10}$/.test(phone)) {
+                return res.json({
+                    success: false,
+                    error: 'Invalid phone. Must be 10 digits.'
+                });
+            }
+            
+            try {
+                // Encrypt payload
+                const payload = {
+                    phoneNumber: phone,
+                    timestamp: Date.now()
+                };
+                const encrypted = encryptPayload(JSON.stringify(payload), ENCRYPTION_KEY);
+                
+                return res.json({
+                    success: true,
+                    message: 'GET endpoint working',
+                    phone: phone,
+                    encrypted_payload: encrypted,
+                    length: encrypted.length,
+                    note: 'This is just showing the encrypted payload. Use POST to actually send OTP.'
+                });
+            } catch (error) {
+                return res.json({ success: false, error: error.message });
+            }
+        }
+        
+        // No phone parameter - show info
         return res.json({
             message: '🎯 MPokket OTP API',
             status: 'Live',
-            usage: 'POST /api/send-otp with {"phone_number": "10-digit-number"}',
-            example: 'curl -X POST https://yourapp.vercel.app/api/send-otp -H "Content-Type: application/json" -d \'{"phone_number":"9876543210"}\''
+            endpoints: {
+                'GET /api/send-otp?phone=9876543210': 'Test encryption',
+                'POST /api/send-otp': 'Send OTP (with JSON body)',
+                'POST /api/send-otp?phone=9876543210': 'Send OTP (with query param)'
+            },
+            usage: {
+                get: 'https://motp.vercel.app/api/send-otp?phone=9876543210',
+                post_curl: 'curl -X POST https://motp.vercel.app/api/send-otp -H "Content-Type: application/json" -d \'{"phone_number":"9876543210"}\'',
+                post_js: `fetch('https://motp.vercel.app/api/send-otp', {
+  method: 'POST',
+  headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({phone_number:'9876543210'})
+})`
+            }
         });
     }
     
     // Handle POST request
     if (req.method === 'POST') {
         try {
-            let body;
+            let phone_number;
             
-            // Parse body (handle both string and object)
-            if (typeof req.body === 'string') {
-                body = JSON.parse(req.body);
+            // Parse phone from both body and query
+            if (req.query.phone) {
+                phone_number = req.query.phone;
             } else {
-                body = req.body;
+                let body = {};
+                
+                try {
+                    if (req.body) {
+                        if (typeof req.body === 'string') {
+                            body = JSON.parse(req.body);
+                        } else if (typeof req.body === 'object') {
+                            body = req.body;
+                        }
+                    }
+                } catch (e) {
+                    console.log('Body parsing error:', e);
+                }
+                
+                phone_number = body.phone_number || body.phone;
             }
-            
-            const { phone_number } = body;
             
             // Validate
             if (!phone_number) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Phone number required',
-                    example: { phone_number: '9876543210' }
+                    error: 'Phone number required. Use: ?phone=9876543210 or {"phone_number":"9876543210"}'
                 });
             }
             
-            // Validate 10-digit number
             if (!/^\d{10}$/.test(phone_number)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Invalid phone number. Must be 10 digits.'
+                    error: 'Invalid phone. Must be 10 digits.'
                 });
             }
             
-            // Prepare payload
-            const payloadData = {
+            // Create payload
+            const payload = {
                 phoneNumber: phone_number,
                 timestamp: Date.now(),
                 deviceId: `web_${Date.now()}`,
                 source: 'web'
             };
             
-            // Encrypt
-            const encrypted = encryptPayload(JSON.stringify(payloadData), ENCRYPTION_KEY);
+            const jsonString = JSON.stringify(payload);
+            const encrypted = encryptPayload(jsonString, ENCRYPTION_KEY);
             
-            // Send to Mpokket
-            const mpokketResponse = await fetch('https://web-api.mpokket.in/registration/sendOtp/sign-up', {
+            console.log('Sending request to Mpokket with payload:', {
+                phone: phone_number,
+                payloadLength: encrypted.length
+            });
+            
+            // Make request to Mpokket
+            const response = await fetch('https://web-api.mpokket.in/registration/sendOtp/sign-up', {
                 method: 'POST',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -100,38 +158,65 @@ module.exports = async (req, res) => {
                     'referer': 'https://web.mpokket.in/',
                     'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
                     'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"Windows"'
+                    'sec-ch-ua-platform': '"Windows"',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br'
                 },
                 body: JSON.stringify({ payload: encrypted })
             });
             
-            const result = await mpokketResponse.json();
+            // Get response as text first
+            const responseText = await response.text();
+            let responseData;
             
-            // Return response
+            try {
+                responseData = JSON.parse(responseText);
+            } catch (e) {
+                // If it's not JSON, it's probably HTML
+                console.log('Response is not JSON, might be HTML');
+                console.log('First 500 chars:', responseText.substring(0, 500));
+                
+                // Check if it's an HTML error page
+                if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                    return res.json({
+                        success: false,
+                        error: 'MPokket returned HTML instead of JSON',
+                        status: response.status,
+                        hint: 'The request might be blocked or rejected',
+                        response_preview: responseText.substring(0, 200)
+                    });
+                } else {
+                    return res.json({
+                        success: false,
+                        error: 'Failed to parse response as JSON',
+                        raw_response: responseText.substring(0, 500),
+                        status: response.status
+                    });
+                }
+            }
+            
+            // Return successful response
             return res.json({
-                success: mpokketResponse.ok,
-                status: mpokketResponse.status,
-                message: mpokketResponse.ok ? 'OTP request sent' : 'Failed to send OTP',
-                response: result,
+                success: response.ok,
+                status: response.status,
+                message: response.ok ? 'OTP request processed' : 'Request failed',
+                mpokket_response: responseData,
                 debug: {
                     phone: phone_number,
-                    encrypted_length: encrypted.length,
-                    timestamp: payloadData.timestamp
+                    encrypted_payload_length: encrypted.length,
+                    request_body: { payload: encrypted }
                 }
             });
             
         } catch (error) {
+            console.error('API Error:', error);
             return res.status(500).json({
                 success: false,
                 error: error.message,
-                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                stack: error.stack
             });
         }
     }
     
-    // Method not allowed
-    return res.status(405).json({ 
-        success: false, 
-        error: 'Method not allowed. Use GET or POST.' 
-    });
+    return res.status(405).json({ error: 'Method not allowed' });
 };
