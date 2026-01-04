@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 
-// Encryption key
 const ENCRYPTION_KEY = "X2h7nJ28tkfM4Yp9q1LdB3";
 
 function encryptPayload(data, password) {
@@ -24,7 +23,6 @@ function encryptPayload(data, password) {
 }
 
 module.exports = async (req, res) => {
-    // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -34,186 +32,197 @@ module.exports = async (req, res) => {
         return;
     }
     
-    // Handle GET - show API info
+    // GET request - show info
     if (req.method === 'GET') {
-        // Check if phone parameter is provided in GET
-        if (req.query.phone) {
-            const phone = req.query.phone;
-            
-            // Validate phone
-            if (!/^\d{10}$/.test(phone)) {
-                return res.json({
-                    success: false,
-                    error: 'Invalid phone. Must be 10 digits.'
-                });
-            }
-            
-            try {
-                // Encrypt payload
-                const payload = {
-                    phoneNumber: phone,
-                    timestamp: Date.now()
-                };
-                const encrypted = encryptPayload(JSON.stringify(payload), ENCRYPTION_KEY);
-                
-                return res.json({
-                    success: true,
-                    message: 'GET endpoint working',
-                    phone: phone,
-                    encrypted_payload: encrypted,
-                    length: encrypted.length,
-                    note: 'This is just showing the encrypted payload. Use POST to actually send OTP.'
-                });
-            } catch (error) {
-                return res.json({ success: false, error: error.message });
-            }
-        }
-        
-        // No phone parameter - show info
         return res.json({
             message: '🎯 MPokket OTP API',
             status: 'Live',
-            endpoints: {
-                'GET /api/send-otp?phone=9876543210': 'Test encryption',
-                'POST /api/send-otp': 'Send OTP (with JSON body)',
-                'POST /api/send-otp?phone=9876543210': 'Send OTP (with query param)'
-            },
             usage: {
-                get: 'https://motp.vercel.app/api/send-otp?phone=9876543210',
-                post_curl: 'curl -X POST https://motp.vercel.app/api/send-otp -H "Content-Type: application/json" -d \'{"phone_number":"9876543210"}\'',
-                post_js: `fetch('https://motp.vercel.app/api/send-otp', {
-  method: 'POST',
-  headers: {'Content-Type':'application/json'},
-  body: JSON.stringify({phone_number:'9876543210'})
-})`
-            }
+                method: 'POST',
+                url: 'https://motp.vercel.app/api/send-otp',
+                body: '{"phone":"9876543210"} OR ?phone=9876543210'
+            },
+            test_links: [
+                'https://motp.vercel.app/api/send-otp?phone=9876543210 (GET - test only)',
+                'Use POST to actually send OTP'
+            ]
         });
     }
     
-    // Handle POST request
+    // POST request
     if (req.method === 'POST') {
         try {
-            let phone_number;
+            let phone;
             
-            // Parse phone from both body and query
+            // Get phone from query or body
             if (req.query.phone) {
-                phone_number = req.query.phone;
+                phone = req.query.phone;
             } else {
                 let body = {};
-                
-                try {
-                    if (req.body) {
-                        if (typeof req.body === 'string') {
-                            body = JSON.parse(req.body);
-                        } else if (typeof req.body === 'object') {
-                            body = req.body;
-                        }
+                if (req.body) {
+                    try {
+                        body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+                    } catch (e) {
+                        body = {};
                     }
-                } catch (e) {
-                    console.log('Body parsing error:', e);
                 }
-                
-                phone_number = body.phone_number || body.phone;
+                phone = body.phone || body.phone_number;
             }
             
-            // Validate
-            if (!phone_number) {
+            if (!phone || !/^\d{10}$/.test(phone)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Phone number required. Use: ?phone=9876543210 or {"phone_number":"9876543210"}'
+                    error: 'Valid 10-digit phone number required'
                 });
             }
             
-            if (!/^\d{10}$/.test(phone_number)) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Invalid phone. Must be 10 digits.'
-                });
-            }
+            console.log(`Processing OTP request for: ${phone}`);
             
-            // Create payload
-            const payload = {
-                phoneNumber: phone_number,
+            // IMPORTANT: Create the EXACT payload structure
+            // Based on typical Indian OTP APIs, it might need:
+            const payloadData = {
+                mobile: phone,
+                phone: phone,
+                mobileNumber: phone,
+                countryCode: "91",
+                phoneNumber: `+91${phone}`,
                 timestamp: Date.now(),
-                deviceId: `web_${Date.now()}`,
-                source: 'web'
+                deviceId: `web-${Date.now()}`,
+                source: "WEB",
+                platform: "web",
+                os: "Windows",
+                browser: "Chrome",
+                version: "120.0.0.0"
             };
             
-            const jsonString = JSON.stringify(payload);
-            const encrypted = encryptPayload(jsonString, ENCRYPTION_KEY);
+            // Try different payload formats
+            const payloadVariants = [
+                JSON.stringify(payloadData),
+                JSON.stringify({ mobile: phone, countryCode: "91" }),
+                JSON.stringify({ phoneNumber: phone }),
+                JSON.stringify({ mobileNumber: phone, source: "web" })
+            ];
             
-            console.log('Sending request to Mpokket with payload:', {
-                phone: phone_number,
-                payloadLength: encrypted.length
-            });
+            let finalResponse = null;
+            let successfulVariant = null;
             
-            // Make request to Mpokket
-            const response = await fetch('https://web-api.mpokket.in/registration/sendOtp/sign-up', {
-                method: 'POST',
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Content-Type': 'application/json',
-                    'origin': 'https://web.mpokket.in',
-                    'referer': 'https://web.mpokket.in/',
-                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"Windows"',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br'
-                },
-                body: JSON.stringify({ payload: encrypted })
-            });
-            
-            // Get response as text first
-            const responseText = await response.text();
-            let responseData;
-            
-            try {
-                responseData = JSON.parse(responseText);
-            } catch (e) {
-                // If it's not JSON, it's probably HTML
-                console.log('Response is not JSON, might be HTML');
-                console.log('First 500 chars:', responseText.substring(0, 500));
+            // Try each payload variant
+            for (let i = 0; i < payloadVariants.length; i++) {
+                const variant = payloadVariants[i];
+                const encrypted = encryptPayload(variant, ENCRYPTION_KEY);
                 
-                // Check if it's an HTML error page
-                if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-                    return res.json({
-                        success: false,
-                        error: 'MPokket returned HTML instead of JSON',
-                        status: response.status,
-                        hint: 'The request might be blocked or rejected',
-                        response_preview: responseText.substring(0, 200)
+                console.log(`Trying variant ${i + 1}: ${variant.substring(0, 50)}...`);
+                
+                try {
+                    const mpokketResponse = await fetch('https://web-api.mpokket.in/registration/sendOtp/sign-up', {
+                        method: 'POST',
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'application/json, text/plain, */*',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Content-Type': 'application/json',
+                            'Origin': 'https://web.mpokket.in',
+                            'Referer': 'https://web.mpokket.in/',
+                            'Sec-Fetch-Dest': 'empty',
+                            'Sec-Fetch-Mode': 'cors',
+                            'Sec-Fetch-Site': 'same-site',
+                            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                            'sec-ch-ua-mobile': '?0',
+                            'sec-ch-ua-platform': '"Windows"',
+                            'DNT': '1',
+                            'Connection': 'keep-alive'
+                        },
+                        body: JSON.stringify({ payload: encrypted }),
+                        // Add timeout
+                        signal: AbortSignal.timeout(10000)
                     });
-                } else {
-                    return res.json({
-                        success: false,
-                        error: 'Failed to parse response as JSON',
-                        raw_response: responseText.substring(0, 500),
-                        status: response.status
-                    });
+                    
+                    const responseText = await mpokketResponse.text();
+                    
+                    if (mpokketResponse.ok) {
+                        try {
+                            const jsonResponse = JSON.parse(responseText);
+                            finalResponse = {
+                                success: true,
+                                variant: i + 1,
+                                response: jsonResponse,
+                                status: mpokketResponse.status
+                            };
+                            successfulVariant = variant;
+                            break;
+                        } catch (e) {
+                            // Not JSON but maybe successful
+                            if (responseText.includes('success') || responseText.includes('OTP')) {
+                                finalResponse = {
+                                    success: true,
+                                    variant: i + 1,
+                                    raw_response: responseText.substring(0, 200),
+                                    status: mpokketResponse.status
+                                };
+                                successfulVariant = variant;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If we get HTML, skip
+                    if (responseText.includes('<!DOCTYPE')) {
+                        console.log(`Variant ${i + 1}: Got HTML response`);
+                        continue;
+                    }
+                    
+                } catch (error) {
+                    console.log(`Variant ${i + 1} failed: ${error.message}`);
+                    continue;
                 }
             }
             
-            // Return successful response
-            return res.json({
-                success: response.ok,
-                status: response.status,
-                message: response.ok ? 'OTP request processed' : 'Request failed',
-                mpokket_response: responseData,
-                debug: {
-                    phone: phone_number,
-                    encrypted_payload_length: encrypted.length,
-                    request_body: { payload: encrypted }
-                }
-            });
+            if (finalResponse) {
+                return res.json({
+                    success: true,
+                    message: 'OTP request sent successfully',
+                    ...finalResponse,
+                    debug: {
+                        phone: phone,
+                        successful_payload_format: successfulVariant,
+                        note: 'If OTP not received, payload format might need adjustment'
+                    }
+                });
+            } else {
+                // If all variants fail, try a direct approach with minimal headers
+                const minimalEncrypted = encryptPayload(JSON.stringify({ phoneNumber: phone }), ENCRYPTION_KEY);
+                
+                const directResponse = await fetch('https://web-api.mpokket.in/registration/sendOtp/sign-up', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    },
+                    body: JSON.stringify({ payload: minimalEncrypted })
+                });
+                
+                const directText = await directResponse.text();
+                
+                return res.json({
+                    success: directResponse.ok,
+                    status: directResponse.status,
+                    response_preview: directText.substring(0, 300),
+                    error: directResponse.ok ? null : 'All attempts failed',
+                    debug_info: {
+                        encrypted_sample: minimalEncrypted.substring(0, 50) + '...',
+                        key_used: ENCRYPTION_KEY,
+                        suggestion: 'Try capturing exact request from browser DevTools'
+                    }
+                });
+            }
             
         } catch (error) {
-            console.error('API Error:', error);
+            console.error('Error:', error);
             return res.status(500).json({
                 success: false,
                 error: error.message,
-                stack: error.stack
+                help: 'The request is being blocked. This could be due to: 1) Wrong payload format, 2) IP blocking, 3) Missing headers'
             });
         }
     }
